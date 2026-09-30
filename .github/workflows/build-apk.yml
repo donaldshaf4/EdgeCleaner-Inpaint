@@ -11,6 +11,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -35,7 +38,7 @@ jobs:
         with:
           gradle-version: '9.6.0'
 
-      - name: Unpack Android project
+      - name: Unpack project
         run: |
           rm -rf project
           mkdir project
@@ -43,12 +46,52 @@ jobs:
           test -f project/settings.gradle
           test -f project/app/build.gradle
 
-      - name: Build debug APK
-        run: gradle -p project :app:assembleDebug --stacktrace
+      - name: Prepare version and signing
+        id: prepare
+        run: |
+          echo "version_code=$((1000 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          echo "version_name=4.0.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ] && [ -n "$ANDROID_KEYSTORE_PASSWORD" ]; then
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/project/release-key.jks"
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Upload APK
+      - name: Build signed RELEASE APK
+        if: steps.prepare.outputs.signed == 'true'
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ github.workspace }}/project/release-key.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: edgecleaner
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          gradle -p project :app:assembleRelease \
+            -PversionCode=${{ steps.prepare.outputs.version_code }} \
+            -PversionName=${{ steps.prepare.outputs.version_name }} \
+            --stacktrace
+
+      - name: Upload signed RELEASE APK
+        if: steps.prepare.outputs.signed == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: EdgeCleaner-Inpaint-APK
+          name: EdgeCleaner-Inpaint-RELEASE
+          path: project/app/build/outputs/apk/release/app-release.apk
+          if-no-files-found: error
+
+      - name: Build DEBUG APK (signing secrets not configured)
+        if: steps.prepare.outputs.signed != 'true'
+        run: |
+          echo "::warning::Release signing secrets are not configured. Building DEBUG APK only."
+          gradle -p project :app:assembleDebug \
+            -PversionCode=${{ steps.prepare.outputs.version_code }} \
+            -PversionName=${{ steps.prepare.outputs.version_name }} \
+            --stacktrace
+
+      - name: Upload DEBUG APK
+        if: steps.prepare.outputs.signed != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: EdgeCleaner-Inpaint-DEBUG-NOT-FOR-UPDATES
           path: project/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
