@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: Checkout
@@ -21,25 +23,27 @@ jobs:
           java-version: '17'
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
-      - name: Install Android SDK
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - name: Install Android SDK packages
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Set up Gradle
+      - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.6.0'
 
-      - name: Unpack project
+      - name: Unpack Android project
         run: |
+          rm -rf project
           mkdir project
-          unzip -q edgecleaner-inpaint-android.zip -d project
-          ls -la project
+          unzip -q EdgeCleaner-Inpaint-repo.zip -d project
           test -f project/settings.gradle
           test -f project/app/build.gradle
 
-      - name: Build APK
+      - name: Build debug APK
         run: gradle -p project :app:assembleDebug --stacktrace
 
       - name: Upload APK
@@ -47,3 +51,4 @@ jobs:
         with:
           name: EdgeCleaner-Inpaint-APK
           path: project/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
